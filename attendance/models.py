@@ -1,6 +1,13 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from datetime import date
+from datetime import date,datetime,timedelta
+
+
+
+class AgeLimitException(Exception):
+    def __init__(self, message="年龄不得小于18岁。"):
+        self.message = message
+        super().__init__(self.message)
 
 class Employee(models.Model):
     GENDER_CHOICES = [
@@ -10,14 +17,11 @@ class Employee(models.Model):
     employee_id = models.CharField(max_length=10, unique=True)
     employee_name = models.CharField(max_length=50)
     employee_gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
-    employee_age = models.PositiveIntegerField()
-
-    def clean(self):
-        if self.employee_age < 18:
-            raise models.ValidationError("年龄不能小于18岁。")
-
+    employee_age = models.PositiveIntegerField(default=18)
+    employee_title = models.CharField(max_length=150, blank=True, null=True)
     def save(self, *args, **kwargs):
-        self.full_clean()
+        if self.employee_age < 18:
+            raise ValidationError("年龄不得小于18岁。")
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -33,10 +37,15 @@ class BusinessTrip(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     start_date = models.DateField(default=date.today)
     end_date = models.DateField(default=date.today)
-    days = models.DurationField(blank=True, null=True)
+    days = models.PositiveIntegerField(blank=True, null=True)
+
+    def clean(self):
+        if self.end_date < self.start_date:
+            raise ValidationError("结束日期不能早于开始日期。")
 
     def save(self, *args, **kwargs):
-        self.days = self.end_date - self.start_date
+        self.clean()
+        self.days = (self.end_date - self.start_date).days
         super().save(*args, **kwargs)
 
 class Leave(models.Model):
@@ -45,6 +54,10 @@ class Leave(models.Model):
     end_date = models.DateField(default=date.today)
     days = models.DurationField(blank=True, null=True)
 
+    def clean(self):
+        if self.end_date < self.start_date:
+            raise ValidationError("结束日期不能早于开始日期。")
+
     def save(self, *args, **kwargs):
         self.days = self.end_date - self.start_date
         super().save(*args, **kwargs)
@@ -52,13 +65,12 @@ class Leave(models.Model):
 
 class Overtime(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
-    start_date = models.DateField(default=date.today)
-    end_date = models.DateField(default=date.today)
-    hours = models.FloatField(blank=True, null=True)
+    start_time = models.DateTimeField(default=datetime.now)
+    end_time = models.DateTimeField(default=datetime.now() + timedelta(hours=1))
+    hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        duration = self.end_date - self.start_date
-        self.hours = duration.days * 24 + duration.seconds // 3600
+        self.hours = (self.end_time - self.start_time).total_seconds() / 3600
         super().save(*args, **kwargs)
 
 
