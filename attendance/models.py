@@ -19,9 +19,11 @@ class Employee(models.Model):
     employee_gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     employee_age = models.PositiveIntegerField(default=18)
     employee_title = models.CharField(max_length=150, blank=True, null=True)
-    def save(self, *args, **kwargs):
+    def clean(self, *args, **kwargs):
         if self.employee_age < 18:
             raise ValidationError("年龄不得小于18岁。")
+    def save(self, *args, **kwargs):
+        self.clean()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -59,6 +61,7 @@ class Leave(models.Model):
             raise ValidationError("结束日期不能早于开始日期。")
 
     def save(self, *args, **kwargs):
+        self.clean()
         self.days = self.end_date - self.start_date
         super().save(*args, **kwargs)
 
