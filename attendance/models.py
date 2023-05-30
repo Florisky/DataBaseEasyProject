@@ -4,11 +4,6 @@ from datetime import date,datetime,timedelta
 
 
 
-class AgeLimitException(Exception):
-    def __init__(self, message="年龄不得小于18岁。"):
-        self.message = message
-        super().__init__(self.message)
-
 class Employee(models.Model):
     GENDER_CHOICES = [
         ('M', '男'),
@@ -29,11 +24,27 @@ class Employee(models.Model):
     def __str__(self):
         return self.employee_name
 
-class Attendance(models.Model):
+class AttendanceRecord(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     check_in_time = models.DateTimeField()
     check_out_time = models.DateTimeField()
     isabsenteeism = models.BooleanField(default=False)
+
+    def clean(self, *args, **kwargs):
+        overlapping_records = AttendanceRecord.objects.filter(
+            employee=self.employee,
+            check_out_time__gt=self.check_in_time,
+            check_in_time__lt=self.check_out_time,
+        ).exclude(pk=self.pk)
+
+        if overlapping_records.exists():
+            raise ValidationError("出勤时间与其他记录存在重叠。")
+
+        super().clean(*args, **kwargs)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 class BusinessTrip(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
@@ -42,13 +53,24 @@ class BusinessTrip(models.Model):
     days = models.PositiveIntegerField(blank=True, null=True)
 
     def clean(self):
+        super().clean()
         if self.end_date < self.start_date:
             raise ValidationError("结束日期不能早于开始日期。")
+
+        overlaps = BusinessTrip.objects.filter(
+            employee=self.employee,
+            start_date__lte=self.end_date,
+            end_date__gte=self.start_date,
+        ).exclude(pk=self.pk)
+
+        if overlaps.exists():
+            raise ValidationError("出差时间与其他记录重叠。")
 
     def save(self, *args, **kwargs):
         self.clean()
         self.days = (self.end_date - self.start_date).days
         super().save(*args, **kwargs)
+
 
 class Leave(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
@@ -57,26 +79,51 @@ class Leave(models.Model):
     days = models.DurationField(blank=True, null=True)
 
     def clean(self):
+        super().clean()
         if self.end_date < self.start_date:
             raise ValidationError("结束日期不能早于开始日期。")
+
+        overlaps = Leave.objects.filter(
+            employee=self.employee,
+            start_date__lte=self.end_date,
+            end_date__gte=self.start_date,
+        ).exclude(pk=self.pk)
+
+        if overlaps.exists():
+            raise ValidationError("请假时间与其他记录重叠。")
 
     def save(self, *args, **kwargs):
         self.clean()
         self.days = self.end_date - self.start_date
         super().save(*args, **kwargs)
 
-
-class Overtime(models.Model):
+class OverTime(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     start_time = models.DateTimeField(default=datetime.now)
     end_time = models.DateTimeField(default=datetime.now() + timedelta(hours=1))
     hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
+    def clean(self, *args, **kwargs):
+        overlapping_records = OverTime.objects.filter(
+            employee=self.employee,
+            end_time__gt=self.start_time,
+            start_time__lt=self.end_time,
+        ).exclude(pk=self.pk)
+
+        if overlapping_records.exists():
+            raise ValidationError("加班时间与其他记录存在重叠。")
+
+        attendance_records = AttendanceRecord.objects.filter(
+            employee=self.employee,
+            check_out_time__gt=self.start_time
+        )
+
+        if not attendance_records.exists():
+            raise ValidationError("加班时间必须在正常出勤时间之后。")
+
+        super().clean(*args, **kwargs)
+
     def save(self, *args, **kwargs):
         self.hours = (self.end_time - self.start_time).total_seconds() / 3600
+        self.full_clean()
         super().save(*args, **kwargs)
-
-
-    class Meta:
-        verbose_name_plural = "OverTime"
-
