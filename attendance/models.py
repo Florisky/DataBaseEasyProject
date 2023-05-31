@@ -71,7 +71,6 @@ class BusinessTrip(models.Model):
         self.days = (self.end_date - self.start_date).days
         super().save(*args, **kwargs)
 
-
 class Leave(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     start_date = models.DateField(default=date.today)
@@ -83,14 +82,23 @@ class Leave(models.Model):
         if self.end_date < self.start_date:
             raise ValidationError("结束日期不能早于开始日期。")
 
-        overlaps = Leave.objects.filter(
+        overlapping_attendance = AttendanceRecord.objects.filter(
             employee=self.employee,
-            start_date__lte=self.end_date,
-            end_date__gte=self.start_date,
-        ).exclude(pk=self.pk)
+            check_out_time__gte=self.start_date,
+            check_in_time__lte=self.end_date,
+        )
 
-        if overlaps.exists():
-            raise ValidationError("请假时间与其他记录重叠。")
+        if overlapping_attendance.exists():
+            raise ValidationError("请假时间与出勤记录重叠。")
+
+        overlapping_business_trip = BusinessTrip.objects.filter(
+            employee=self.employee,
+            end_date__gte=self.start_date,
+            start_date__lte=self.end_date,
+        )
+
+        if overlapping_business_trip.exists():
+            raise ValidationError("请假时间与出差记录重叠。")
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -103,27 +111,22 @@ class OverTime(models.Model):
     end_time = models.DateTimeField(default=datetime.now() + timedelta(hours=1))
     hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
-    def clean(self, *args, **kwargs):
-        overlapping_records = OverTime.objects.filter(
-            employee=self.employee,
-            end_time__gt=self.start_time,
-            start_time__lt=self.end_time,
-        ).exclude(pk=self.pk)
+    def clean(self):
+        super().clean()
+        if self.end_time < self.start_time:
+            raise ValidationError("结束日期不能早于开始日期。")
 
-        if overlapping_records.exists():
-            raise ValidationError("加班时间与其他记录存在重叠。")
-
-        attendance_records = AttendanceRecord.objects.filter(
-            employee=self.employee,
-            check_out_time__gt=self.start_time
-        )
-
-        if not attendance_records.exists():
-            raise ValidationError("加班时间必须在正常出勤时间之后。")
-
-        super().clean(*args, **kwargs)
+        attendance_records = AttendanceRecord.objects.filter(employee=self.employee)
+        if attendance_records.exists():
+            last_check_out_time = attendance_records.latest('check_out_time').check_out_time
+            if self.start_time < last_check_out_time:
+                raise ValidationError("加班开始时间必须在最后一次考勤记录的结束时间之后。")
 
     def save(self, *args, **kwargs):
+        self.clean()
         self.hours = (self.end_time - self.start_time).total_seconds() / 3600
-        self.full_clean()
         super().save(*args, **kwargs)
+
+    class Meta:
+        verbose_name_plural = "OverTime"
+
