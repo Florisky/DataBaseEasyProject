@@ -31,6 +31,9 @@ class AttendanceRecord(models.Model):
     isabsenteeism = models.BooleanField(default=False)
 
     def clean(self, *args, **kwargs):
+        if self.check_out_time < self.check_in_time:
+            raise ValidationError("结束时间不能早于开始时间。")
+
         overlapping_records = AttendanceRecord.objects.filter(
             employee=self.employee,
             check_out_time__gt=self.check_in_time,
@@ -114,7 +117,7 @@ class OverTime(models.Model):
     def clean(self):
         super().clean()
         if self.end_time < self.start_time:
-            raise ValidationError("结束日期不能早于开始日期。")
+            raise ValidationError("结束时间不能早于开始时间。")
 
         attendance_records = AttendanceRecord.objects.filter(employee=self.employee)
         if attendance_records.exists():
